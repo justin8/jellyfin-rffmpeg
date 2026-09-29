@@ -12,9 +12,11 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY rffmpeg /usr/local/bin/rffmpeg
+COPY rffmpeg-init /usr/local/bin/rffmpeg-init
 
-RUN chmod 755 /usr/local/bin/rffmpeg && \
+RUN chmod 755 /usr/local/bin/rffmpeg /usr/local/bin/rffmpeg-init && \
     ln -sf /usr/local/bin/rffmpeg /usr/local/bin/ffmpeg && \
     ln -sf /usr/local/bin/rffmpeg /usr/local/bin/ffprobe && \
     mkdir -p /etc/rffmpeg /var/lib/rffmpeg /run/shm && \
     chmod 777 /var/lib/rffmpeg /run/shm
+

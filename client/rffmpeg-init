@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""
+rffmpeg-init: Dynamic Kubernetes cluster worker discovery and initializer for rffmpeg.
+"""
+
+import json
+import logging
+import os
+import sqlite3
+import ssl
+import subprocess
+import sys
+import time
+import urllib.request
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("rffmpeg-init")
+
+RFFMPEG_CONFIG = os.environ.get("RFFMPEG_CONFIG", "/etc/rffmpeg/rffmpeg.yml")
+WORKER_LABEL = os.environ.get("RFFMPEG_WORKER_LABEL", "app=jellyfin-rffmpeg-worker")
+SSH_KEY_SOURCE = os.environ.get("SSH_KEY_SOURCE", "/etc/rffmpeg-ssh/id_ed25519")
+SSH_KEY_DEST = os.environ.get("SSH_KEY_DEST", "/config/.ssh/id_ed25519")
+CACHE_TEMP_DIR = os.environ.get("CACHE_TEMP_DIR", "/cache/temp")
+DB_PATH = os.environ.get("RFFMPEG_DB", "/config/rffmpeg/rffmpeg.db")
+
+def setup_filesystem():
+    """Ensure required directories exist and copy SSH key with strict permissions."""
+    os.makedirs("/config/.ssh", exist_ok=True)
+    os.makedirs("/config/rffmpeg", exist_ok=True)
+    os.makedirs("/config/log", exist_ok=True)
+    os.makedirs(CACHE_TEMP_DIR, exist_ok=True)
+
+    if os.path.exists(SSH_KEY_SOURCE):
+        logger.info(f"Copying SSH key from {SSH_KEY_SOURCE} to {SSH_KEY_DEST}...")
+        with open(SSH_KEY_SOURCE, "rb") as src, open(SSH_KEY_DEST, "wb") as dst:
+            dst.write(src.read())
+        os.chmod(SSH_KEY_DEST, 0o600)
+        logger.info(f"Set permissions 0600 on {SSH_KEY_DEST}")
+
+def init_database():
+    """Initialize rffmpeg database if not present."""
+    os.environ["RFFMPEG_CONFIG"] = RFFMPEG_CONFIG
+    if not os.path.exists(DB_PATH):
+        logger.info("Initializing rffmpeg database...")
+        subprocess.run(["rffmpeg", "init", "--no-root"], check=True)
+
+def discover_worker_nodes():
+    """Query in-cluster Kubernetes API to discover worker node IPs."""
+    ns_file = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+    namespace = "jellyfin"
+    if os.path.exists(ns_file):
+        with open(ns_file) as f:
+            namespace = f.read().strip()
+
+    token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    token = ""
+    if os.path.exists(token_file):
+        with open(token_file) as f:
+            token = f.read().strip()
+
+    ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    ctx = ssl.create_default_context(cafile=ca_file) if os.path.exists(ca_file) else None
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    api_url = f"https://kubernetes.default.svc/api/v1/namespaces/{namespace}/pods?labelSelector={WORKER_LABEL}"
+
+    discovered_nodes = set()
+    logger.info(f"Discovering worker pods matching '{WORKER_LABEL}' in namespace '{namespace}'...")
+
+    for attempt in range(6):
+        try:
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+                for pod in data.get("items", []):
+                    host_ip = pod.get("status", {}).get("hostIP")
+                    phase = pod.get("status", {}).get("phase", "")
+                    if host_ip and phase != "Failed":
+                        discovered_nodes.add(host_ip)
+        except Exception as e:
+            logger.warning(f"Kubernetes API query attempt {attempt + 1} failed: {e}")
+
+        if discovered_nodes:
+            break
+        logger.info("Waiting 5s for worker pods to be assigned host IPs...")
+        time.sleep(5)
+
+    return discovered_nodes
+
+def sync_rffmpeg_hosts(discovered_nodes):
+    """Synchronize discovered worker node IPs with rffmpeg SQLite database."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT hostname FROM hosts")
+    current_hosts = {row[0] for row in cur.fetchall()}
+    conn.close()
+
+    logger.info(f"Current hosts in rffmpeg: {sorted(list(current_hosts))}")
+    logger.info(f"Discovered worker node IPs: {sorted(list(discovered_nodes))}")
+
+    # Remove stale hosts
+    for host in current_hosts - discovered_nodes:
+        logger.info(f"Removing obsolete worker host: {host}")
+        subprocess.run(["rffmpeg", "remove", host])
+
+    # Add new hosts
+    for host in discovered_nodes - current_hosts:
+        logger.info(f"Adding new worker host: {host}")
+        subprocess.run(["rffmpeg", "add", host])
+
+def main():
+    setup_filesystem()
+    init_database()
+    nodes = discover_worker_nodes()
+    if not nodes:
+        logger.warning("No worker node IPs discovered! rffmpeg will rely on local fallback until workers are ready.")
+    else:
+        sync_rffmpeg_hosts(nodes)
+
+    logger.info("rffmpeg initialization complete. Current status:")
+    subprocess.run(["rffmpeg", "status"])
+
+if __name__ == "__main__":
+    main()
