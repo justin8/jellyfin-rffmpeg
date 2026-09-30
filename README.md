@@ -122,6 +122,7 @@ This image includes a dedicated discovery tool installed at `/usr/local/bin/rffm
 | `--ssh-key-source` | `SSH_KEY_SOURCE` | `/etc/rffmpeg-ssh/id_ed25519` | Source path of mounted SSH private key |
 | `--ssh-key-dest` | `SSH_KEY_DEST` | `/config/.ssh/id_ed25519` | Destination path where key is copied with 0600 mode |
 | `--cache-temp-dir` | `CACHE_TEMP_DIR` | `/cache/temp` | Shared temporary cache directory |
+| `-i`, `--interval` | `RFFMPEG_SYNC_INTERVAL` | `0` | Continuous sync interval in seconds (0 = run once and exit; >0 = run as background sync loop) |
 
 ---
 

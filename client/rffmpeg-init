@@ -95,6 +95,13 @@ def parse_args():
         default=default_cache_temp,
         help=f"Shared transcode temporary directory (default: '{default_cache_temp}').",
     )
+    parser.add_argument(
+        "-i",
+        "--interval",
+        type=int,
+        default=int(os.environ.get("RFFMPEG_SYNC_INTERVAL", "0")),
+        help="Continuous sync interval in seconds. If 0 (default), run once and exit. If > 0, loop continuously as a sidecar.",
+    )
     return parser.parse_args()
 
 
@@ -212,6 +219,20 @@ def main():
 
     logger.info("rffmpeg initialization complete. Current status:")
     subprocess.run(["rffmpeg", "status"])
+
+    if args.interval > 0:
+        logger.info(f"Starting continuous worker sync loop (interval: {args.interval}s)...")
+        while True:
+            try:
+                time.sleep(args.interval)
+                new_nodes = discover_worker_nodes(args.namespace, args.worker_label)
+                if new_nodes:
+                    sync_rffmpeg_hosts(args, new_nodes)
+            except KeyboardInterrupt:
+                logger.info("Exiting sync loop.")
+                break
+            except Exception as e:
+                logger.error(f"Error during worker sync loop: {e}")
 
 
 if __name__ == "__main__":
