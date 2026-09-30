@@ -17,9 +17,12 @@ RUN apt-get update && \
     chmod 666 /etc/passwd /etc/group
 
 COPY rffmpeg-init /usr/local/bin/rffmpeg-init
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-RUN chmod 755 /usr/local/bin/rffmpeg-init && \
+RUN chmod 755 /usr/local/bin/rffmpeg-init /usr/local/bin/entrypoint.sh && \
     ln -sf /usr/local/bin/rffmpeg /usr/local/bin/ffmpeg && \
     ln -sf /usr/local/bin/rffmpeg /usr/local/bin/ffprobe && \
     mkdir -p /etc/rffmpeg /var/lib/rffmpeg /run/shm && \
     chmod 777 /var/lib/rffmpeg /run/shm
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

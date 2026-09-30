@@ -12,7 +12,8 @@ RUN apt-get update && \
     groupadd -g 2000 jellyfin && \
     useradd -u 2000 -g jellyfin -G video,render -m -s /bin/bash jellyfin && \
     mkdir -p /run/sshd /etc/ssh /home/jellyfin/.ssh /etc/rffmpeg-worker/keys && \
-    chown -R jellyfin:jellyfin /run/sshd /etc/ssh /home/jellyfin
+    chown -R jellyfin:jellyfin /run/sshd /etc/ssh /home/jellyfin && \
+    chmod 666 /etc/passwd /etc/group
 
 COPY sshd_config /etc/ssh/sshd_config
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
