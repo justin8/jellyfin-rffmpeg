@@ -7,7 +7,6 @@ import argparse
 import json
 import logging
 import os
-import re
 import sqlite3
 import ssl
 import subprocess
@@ -54,7 +53,6 @@ def parse_args():
     default_ssh_src = os.environ.get("SSH_KEY_SOURCE", "/etc/rffmpeg-ssh/id_ed25519")
     default_ssh_dst = os.environ.get("SSH_KEY_DEST", "/config/.ssh/id_ed25519")
     default_cache_temp = os.environ.get("CACHE_TEMP_DIR", "/cache/temp")
-    default_encoding_xml = os.environ.get("ENCODING_XML", "/config/config/encoding.xml")
 
     parser.add_argument(
         "-n",
@@ -96,11 +94,6 @@ def parse_args():
         "--cache-temp-dir",
         default=default_cache_temp,
         help=f"Shared transcode temporary directory (default: '{default_cache_temp}').",
-    )
-    parser.add_argument(
-        "--encoding-xml",
-        default=default_encoding_xml,
-        help=f"Path to Jellyfin encoding.xml (default: '{default_encoding_xml}').",
     )
     return parser.parse_args()
 
@@ -188,51 +181,12 @@ def sync_rffmpeg_hosts(args, discovered_nodes):
         subprocess.run(["rffmpeg", "add", host])
 
 
-def configure_jellyfin_encoding(encoding_path):
-    """Ensure Jellyfin's encoding.xml points to /usr/local/bin/ffmpeg."""
-    if not os.path.exists(encoding_path):
-        return
-
-    try:
-        with open(encoding_path, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        new_content = content
-        if "<EncoderAppPath>" in new_content:
-            new_content = re.sub(
-                r"<EncoderAppPath>.*?</EncoderAppPath>",
-                "<EncoderAppPath>/usr/local/bin/ffmpeg</EncoderAppPath>",
-                new_content,
-            )
-        else:
-            new_content = re.sub(
-                r"(<EncodingOptions[^>]*>)",
-                r"\1\n  <EncoderAppPath>/usr/local/bin/ffmpeg</EncoderAppPath>",
-                new_content,
-            )
-
-        if "<EncoderAppPathDisplay>" in new_content:
-            new_content = re.sub(
-                r"<EncoderAppPathDisplay>.*?</EncoderAppPathDisplay>",
-                "<EncoderAppPathDisplay>/usr/local/bin/ffmpeg</EncoderAppPathDisplay>",
-                new_content,
-            )
-
-        if new_content != content:
-            logger.info(f"Configuring Jellyfin {encoding_path} to use /usr/local/bin/ffmpeg...")
-            with open(encoding_path, "w", encoding="utf-8") as f:
-                f.write(new_content)
-    except Exception as e:
-        logger.warning(f"Could not update {encoding_path}: {e}")
-
-
 def main():
     args = parse_args()
     os.environ["RFFMPEG_CONFIG"] = args.rffmpeg_config
 
     setup_filesystem(args)
     init_database(args)
-    configure_jellyfin_encoding(args.encoding_xml)
 
     nodes = discover_worker_nodes(args.namespace, args.worker_label)
     if not nodes:

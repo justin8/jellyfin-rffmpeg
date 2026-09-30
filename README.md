@@ -44,11 +44,16 @@ Both images are built directly on top of the official `jellyfin/jellyfin` image 
 
 In the Jellyfin Web UI, navigate to **Administration → Dashboard → Playback → Transcoding**:
 
-### 1. FFmpeg Path: `/usr/local/bin/ffmpeg`
-Set the **FFmpeg path** to:
-```text
-/usr/local/bin/ffmpeg
+### 1. FFmpeg Path: `JELLYFIN_FFMPEG=/usr/local/bin/ffmpeg`
+In official container deployments, Jellyfin disables editing the FFmpeg path in the Web UI for security (`disabled: true`). 
+
+Instead, configure the path by setting the environment variable on the Jellyfin container:
+```yaml
+env:
+  - name: JELLYFIN_FFMPEG
+    value: /usr/local/bin/ffmpeg
 ```
+Jellyfin's configuration loader automatically prioritizes `JELLYFIN_FFMPEG` over `encoding.xml` and `$PATH`, and automatically writes `<EncoderAppPathDisplay>/usr/local/bin/ffmpeg</EncoderAppPathDisplay>` into `encoding.xml` so it displays in the Web UI dashboard.
 
 #### Why `/usr/local/bin/ffmpeg` and Not `/usr/local/bin/rffmpeg`?
 Upstream `rffmpeg` uses the binary name (`argv[0]`) to differentiate between administrative commands and transcoding operations:
@@ -117,7 +122,6 @@ This image includes a dedicated discovery tool installed at `/usr/local/bin/rffm
 | `--ssh-key-source` | `SSH_KEY_SOURCE` | `/etc/rffmpeg-ssh/id_ed25519` | Source path of mounted SSH private key |
 | `--ssh-key-dest` | `SSH_KEY_DEST` | `/config/.ssh/id_ed25519` | Destination path where key is copied with 0600 mode |
 | `--cache-temp-dir` | `CACHE_TEMP_DIR` | `/cache/temp` | Shared temporary cache directory |
-| `--encoding-xml` | `ENCODING_XML` | `/config/config/encoding.xml` | Path to Jellyfin `encoding.xml` |
 
 ---
 
