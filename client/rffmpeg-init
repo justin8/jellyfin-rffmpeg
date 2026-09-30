@@ -144,16 +144,16 @@ def discover_worker_nodes(namespace, worker_label):
             with urllib.request.urlopen(req, context=ctx, timeout=5) as resp:
                 data = json.loads(resp.read().decode())
                 for pod in data.get("items", []):
-                    host_ip = pod.get("status", {}).get("hostIP")
+                    pod_ip = pod.get("status", {}).get("podIP") or pod.get("status", {}).get("hostIP")
                     phase = pod.get("status", {}).get("phase", "")
-                    if host_ip and phase != "Failed":
-                        discovered_nodes.add(host_ip)
+                    if pod_ip and phase != "Failed":
+                        discovered_nodes.add(pod_ip)
         except Exception as e:
             logger.warning(f"Kubernetes API query attempt {attempt + 1} failed: {e}")
 
         if discovered_nodes:
             break
-        logger.info("Waiting 5s for worker pods to be assigned host IPs...")
+        logger.info("Waiting 5s for worker pods to be assigned IP addresses...")
         time.sleep(5)
 
     return discovered_nodes

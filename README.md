@@ -107,7 +107,7 @@ This image includes a dedicated discovery tool installed at `/usr/local/bin/rffm
       resources: ["pods"]
       verbs: ["get", "list"]
   ```
-- **Host Networking / hostPort**: Assumes worker pods bind to `hostPort: 2222` on each node, allowing `rffmpeg` to route jobs directly to each node's IP address (`pod.status.hostIP`).
+- **Direct Pod Networking**: Discovers worker pods directly by their cluster IP (`pod.status.podIP`), eliminating the need for `hostPort` or elevated namespace security privileges. (Falls back to `hostIP` if `podIP` is not set).
 
 ### Options & Overrides for `rffmpeg-init`:
 
