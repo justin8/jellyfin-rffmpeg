@@ -3,9 +3,11 @@
 rffmpeg-init: Dynamic Kubernetes cluster worker discovery and initializer for rffmpeg.
 """
 
+import argparse
 import json
 import logging
 import os
+import re
 import sqlite3
 import ssl
 import subprocess
@@ -16,42 +18,118 @@ import urllib.request
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("rffmpeg-init")
 
-RFFMPEG_CONFIG = os.environ.get("RFFMPEG_CONFIG", "/etc/rffmpeg/rffmpeg.yml")
-WORKER_LABEL = os.environ.get("RFFMPEG_WORKER_LABEL", "app=jellyfin-rffmpeg-worker")
-SSH_KEY_SOURCE = os.environ.get("SSH_KEY_SOURCE", "/etc/rffmpeg-ssh/id_ed25519")
-SSH_KEY_DEST = os.environ.get("SSH_KEY_DEST", "/config/.ssh/id_ed25519")
-CACHE_TEMP_DIR = os.environ.get("CACHE_TEMP_DIR", "/cache/temp")
-DB_PATH = os.environ.get("RFFMPEG_DB", "/config/rffmpeg/rffmpeg.db")
 
-def setup_filesystem():
+def detect_current_namespace():
+    """Autodetect current Kubernetes namespace from mounted serviceaccount secret."""
+    ns_file = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+    if os.path.exists(ns_file):
+        try:
+            with open(ns_file, "r") as f:
+                detected = f.read().strip()
+                if detected:
+                    return detected
+        except Exception as e:
+            logger.warning(f"Could not read namespace from {ns_file}: {e}")
+    return "default"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Dynamic Kubernetes cluster worker discovery and initializer for rffmpeg."
+    )
+    detected_ns = detect_current_namespace()
+    default_ns = (
+        os.environ.get("RFFMPEG_WORKER_NAMESPACE")
+        or os.environ.get("RFFMPEG_NAMESPACE")
+        or os.environ.get("NAMESPACE")
+        or detected_ns
+    )
+    default_label = (
+        os.environ.get("RFFMPEG_WORKER_LABEL")
+        or os.environ.get("WORKER_LABEL")
+        or "app=jellyfin-rffmpeg-worker"
+    )
+    default_config = os.environ.get("RFFMPEG_CONFIG", "/etc/rffmpeg/rffmpeg.yml")
+    default_db = os.environ.get("RFFMPEG_DB", "/config/rffmpeg/rffmpeg.db")
+    default_ssh_src = os.environ.get("SSH_KEY_SOURCE", "/etc/rffmpeg-ssh/id_ed25519")
+    default_ssh_dst = os.environ.get("SSH_KEY_DEST", "/config/.ssh/id_ed25519")
+    default_cache_temp = os.environ.get("CACHE_TEMP_DIR", "/cache/temp")
+    default_encoding_xml = os.environ.get("ENCODING_XML", "/config/config/encoding.xml")
+
+    parser.add_argument(
+        "-n",
+        "--namespace",
+        default=default_ns,
+        help=f"Kubernetes namespace to search for worker pods (default: autodetected '{default_ns}').",
+    )
+    parser.add_argument(
+        "-l",
+        "--label",
+        dest="worker_label",
+        default=default_label,
+        help=f"Pod label selector for worker pods (default: '{default_label}').",
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        dest="rffmpeg_config",
+        default=default_config,
+        help=f"Path to rffmpeg.yml configuration file (default: '{default_config}').",
+    )
+    parser.add_argument(
+        "--db",
+        dest="db_path",
+        default=default_db,
+        help=f"Path to rffmpeg SQLite database (default: '{default_db}').",
+    )
+    parser.add_argument(
+        "--ssh-key-source",
+        default=default_ssh_src,
+        help=f"Source path of private SSH key (default: '{default_ssh_src}').",
+    )
+    parser.add_argument(
+        "--ssh-key-dest",
+        default=default_ssh_dst,
+        help=f"Destination path for private SSH key (default: '{default_ssh_dst}').",
+    )
+    parser.add_argument(
+        "--cache-temp-dir",
+        default=default_cache_temp,
+        help=f"Shared transcode temporary directory (default: '{default_cache_temp}').",
+    )
+    parser.add_argument(
+        "--encoding-xml",
+        default=default_encoding_xml,
+        help=f"Path to Jellyfin encoding.xml (default: '{default_encoding_xml}').",
+    )
+    return parser.parse_args()
+
+
+def setup_filesystem(args):
     """Ensure required directories exist and copy SSH key with strict permissions."""
     os.makedirs("/config/.ssh", exist_ok=True)
     os.makedirs("/config/rffmpeg", exist_ok=True)
     os.makedirs("/config/log", exist_ok=True)
-    os.makedirs(CACHE_TEMP_DIR, exist_ok=True)
+    os.makedirs(args.cache_temp_dir, exist_ok=True)
 
-    if os.path.exists(SSH_KEY_SOURCE):
-        logger.info(f"Copying SSH key from {SSH_KEY_SOURCE} to {SSH_KEY_DEST}...")
-        with open(SSH_KEY_SOURCE, "rb") as src, open(SSH_KEY_DEST, "wb") as dst:
+    if os.path.exists(args.ssh_key_source):
+        logger.info(f"Copying SSH key from {args.ssh_key_source} to {args.ssh_key_dest}...")
+        with open(args.ssh_key_source, "rb") as src, open(args.ssh_key_dest, "wb") as dst:
             dst.write(src.read())
-        os.chmod(SSH_KEY_DEST, 0o600)
-        logger.info(f"Set permissions 0600 on {SSH_KEY_DEST}")
+        os.chmod(args.ssh_key_dest, 0o600)
+        logger.info(f"Set permissions 0600 on {args.ssh_key_dest}")
 
-def init_database():
+
+def init_database(args):
     """Initialize rffmpeg database if not present."""
-    os.environ["RFFMPEG_CONFIG"] = RFFMPEG_CONFIG
-    if not os.path.exists(DB_PATH):
+    os.environ["RFFMPEG_CONFIG"] = args.rffmpeg_config
+    if not os.path.exists(args.db_path):
         logger.info("Initializing rffmpeg database...")
         subprocess.run(["rffmpeg", "init", "--no-root"], check=True)
 
-def discover_worker_nodes():
-    """Query in-cluster Kubernetes API to discover worker node IPs."""
-    ns_file = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
-    namespace = "jellyfin"
-    if os.path.exists(ns_file):
-        with open(ns_file) as f:
-            namespace = f.read().strip()
 
+def discover_worker_nodes(namespace, worker_label):
+    """Query in-cluster Kubernetes API to discover worker node IPs."""
     token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
     token = ""
     if os.path.exists(token_file):
@@ -62,10 +140,10 @@ def discover_worker_nodes():
     ctx = ssl.create_default_context(cafile=ca_file) if os.path.exists(ca_file) else None
     headers = {"Authorization": f"Bearer {token}"} if token else {}
 
-    api_url = f"https://kubernetes.default.svc/api/v1/namespaces/{namespace}/pods?labelSelector={WORKER_LABEL}"
+    api_url = f"https://kubernetes.default.svc/api/v1/namespaces/{namespace}/pods?labelSelector={worker_label}"
 
     discovered_nodes = set()
-    logger.info(f"Discovering worker pods matching '{WORKER_LABEL}' in namespace '{namespace}'...")
+    logger.info(f"Discovering worker pods matching '{worker_label}' in namespace '{namespace}'...")
 
     for attempt in range(6):
         try:
@@ -87,9 +165,10 @@ def discover_worker_nodes():
 
     return discovered_nodes
 
-def sync_rffmpeg_hosts(discovered_nodes):
+
+def sync_rffmpeg_hosts(args, discovered_nodes):
     """Synchronize discovered worker node IPs with rffmpeg SQLite database."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(args.db_path)
     cur = conn.cursor()
     cur.execute("SELECT hostname FROM hosts")
     current_hosts = {row[0] for row in cur.fetchall()}
@@ -108,10 +187,9 @@ def sync_rffmpeg_hosts(discovered_nodes):
         logger.info(f"Adding new worker host: {host}")
         subprocess.run(["rffmpeg", "add", host])
 
-def configure_jellyfin_encoding():
+
+def configure_jellyfin_encoding(encoding_path):
     """Ensure Jellyfin's encoding.xml points to /usr/local/bin/ffmpeg."""
-    import re
-    encoding_path = "/config/config/encoding.xml"
     if not os.path.exists(encoding_path):
         return
 
@@ -121,33 +199,52 @@ def configure_jellyfin_encoding():
 
         new_content = content
         if "<EncoderAppPath>" in new_content:
-            new_content = re.sub(r"<EncoderAppPath>.*?</EncoderAppPath>", "<EncoderAppPath>/usr/local/bin/ffmpeg</EncoderAppPath>", new_content)
+            new_content = re.sub(
+                r"<EncoderAppPath>.*?</EncoderAppPath>",
+                "<EncoderAppPath>/usr/local/bin/ffmpeg</EncoderAppPath>",
+                new_content,
+            )
         else:
-            new_content = re.sub(r"(<EncodingOptions[^>]*>)", r"\1\n  <EncoderAppPath>/usr/local/bin/ffmpeg</EncoderAppPath>", new_content)
+            new_content = re.sub(
+                r"(<EncodingOptions[^>]*>)",
+                r"\1\n  <EncoderAppPath>/usr/local/bin/ffmpeg</EncoderAppPath>",
+                new_content,
+            )
 
         if "<EncoderAppPathDisplay>" in new_content:
-            new_content = re.sub(r"<EncoderAppPathDisplay>.*?</EncoderAppPathDisplay>", "<EncoderAppPathDisplay>/usr/local/bin/ffmpeg</EncoderAppPathDisplay>", new_content)
+            new_content = re.sub(
+                r"<EncoderAppPathDisplay>.*?</EncoderAppPathDisplay>",
+                "<EncoderAppPathDisplay>/usr/local/bin/ffmpeg</EncoderAppPathDisplay>",
+                new_content,
+            )
 
         if new_content != content:
-            logger.info("Configuring Jellyfin encoding.xml to use /usr/local/bin/ffmpeg...")
+            logger.info(f"Configuring Jellyfin {encoding_path} to use /usr/local/bin/ffmpeg...")
             with open(encoding_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
     except Exception as e:
-        logger.warning(f"Could not update encoding.xml: {e}")
+        logger.warning(f"Could not update {encoding_path}: {e}")
+
 
 def main():
-    setup_filesystem()
-    init_database()
-    configure_jellyfin_encoding()
-    nodes = discover_worker_nodes()
+    args = parse_args()
+    os.environ["RFFMPEG_CONFIG"] = args.rffmpeg_config
+
+    setup_filesystem(args)
+    init_database(args)
+    configure_jellyfin_encoding(args.encoding_xml)
+
+    nodes = discover_worker_nodes(args.namespace, args.worker_label)
     if not nodes:
-        logger.warning("No worker node IPs discovered! rffmpeg will rely on local fallback until workers are ready.")
+        logger.warning(
+            "No worker node IPs discovered! rffmpeg will rely on local fallback until workers are ready."
+        )
     else:
-        sync_rffmpeg_hosts(nodes)
+        sync_rffmpeg_hosts(args, nodes)
 
     logger.info("rffmpeg initialization complete. Current status:")
     subprocess.run(["rffmpeg", "status"])
 
+
 if __name__ == "__main__":
     main()
-

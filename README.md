@@ -104,15 +104,20 @@ This image includes a dedicated discovery tool installed at `/usr/local/bin/rffm
   ```
 - **Host Networking / hostPort**: Assumes worker pods bind to `hostPort: 2222` on each node, allowing `rffmpeg` to route jobs directly to each node's IP address (`pod.status.hostIP`).
 
-### Environment Variables for `rffmpeg-init`:
-| Variable | Default | Description |
-|---|---|---|
-| `RFFMPEG_CONFIG` | `/etc/rffmpeg/rffmpeg.yml` | Path to rffmpeg YAML configuration |
-| `RFFMPEG_WORKER_LABEL` | `app=jellyfin-rffmpeg-worker` | Kubernetes label selector for worker pods |
-| `SSH_KEY_SOURCE` | `/etc/rffmpeg-ssh/id_ed25519` | Source path of mounted SSH private key |
-| `SSH_KEY_DEST` | `/config/.ssh/id_ed25519` | Destination path where key is copied with 0600 mode |
-| `CACHE_TEMP_DIR` | `/cache/temp` | Shared temporary cache directory |
-| `RFFMPEG_DB` | `/config/rffmpeg/rffmpeg.db` | Path to rffmpeg SQLite database |
+### Options & Overrides for `rffmpeg-init`:
+
+`rffmpeg-init` can be configured either via CLI flags or environment variables:
+
+| CLI Option | Environment Variable | Default | Description |
+|---|---|---|---|
+| `-n`, `--namespace` | `RFFMPEG_WORKER_NAMESPACE` / `NAMESPACE` | *(autodetected)* | Namespace to search for worker pods (autodetected from pod's service account mount) |
+| `-l`, `--label` | `RFFMPEG_WORKER_LABEL` | `app=jellyfin-rffmpeg-worker` | Kubernetes label selector for worker pods |
+| `-c`, `--config` | `RFFMPEG_CONFIG` | `/etc/rffmpeg/rffmpeg.yml` | Path to `rffmpeg.yml` configuration |
+| `--db` | `RFFMPEG_DB` | `/config/rffmpeg/rffmpeg.db` | Path to rffmpeg SQLite database |
+| `--ssh-key-source` | `SSH_KEY_SOURCE` | `/etc/rffmpeg-ssh/id_ed25519` | Source path of mounted SSH private key |
+| `--ssh-key-dest` | `SSH_KEY_DEST` | `/config/.ssh/id_ed25519` | Destination path where key is copied with 0600 mode |
+| `--cache-temp-dir` | `CACHE_TEMP_DIR` | `/cache/temp` | Shared temporary cache directory |
+| `--encoding-xml` | `ENCODING_XML` | `/config/config/encoding.xml` | Path to Jellyfin `encoding.xml` |
 
 ---
 
