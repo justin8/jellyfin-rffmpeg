@@ -112,6 +112,20 @@ def setup_filesystem(args):
         os.chmod(args.ssh_key_dest, 0o600)
         logger.info(f"Set permissions 0600 on {args.ssh_key_dest}")
 
+    # Ensure current UID exists in /etc/passwd for OpenSSH client
+    import pwd
+    uid = os.getuid()
+    try:
+        pwd.getpwuid(uid)
+    except KeyError:
+        gid = os.getgid()
+        logger.info(f"Adding UID {uid} to /etc/passwd for OpenSSH client compatibility...")
+        try:
+            with open("/etc/passwd", "a") as f:
+                f.write(f"jellyfin:x:{uid}:{gid}:jellyfin:/config:/bin/bash\n")
+        except Exception as e:
+            logger.warning(f"Could not append to /etc/passwd: {e}")
+
 
 def init_database(args):
     """Initialize rffmpeg database if not present."""
