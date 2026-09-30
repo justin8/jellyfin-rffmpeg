@@ -108,9 +108,37 @@ def sync_rffmpeg_hosts(discovered_nodes):
         logger.info(f"Adding new worker host: {host}")
         subprocess.run(["rffmpeg", "add", host])
 
+def configure_jellyfin_encoding():
+    """Ensure Jellyfin's encoding.xml points to /usr/local/bin/ffmpeg."""
+    import re
+    encoding_path = "/config/config/encoding.xml"
+    if not os.path.exists(encoding_path):
+        return
+
+    try:
+        with open(encoding_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        new_content = content
+        if "<EncoderAppPath>" in new_content:
+            new_content = re.sub(r"<EncoderAppPath>.*?</EncoderAppPath>", "<EncoderAppPath>/usr/local/bin/ffmpeg</EncoderAppPath>", new_content)
+        else:
+            new_content = re.sub(r"(<EncodingOptions[^>]*>)", r"\1\n  <EncoderAppPath>/usr/local/bin/ffmpeg</EncoderAppPath>", new_content)
+
+        if "<EncoderAppPathDisplay>" in new_content:
+            new_content = re.sub(r"<EncoderAppPathDisplay>.*?</EncoderAppPathDisplay>", "<EncoderAppPathDisplay>/usr/local/bin/ffmpeg</EncoderAppPathDisplay>", new_content)
+
+        if new_content != content:
+            logger.info("Configuring Jellyfin encoding.xml to use /usr/local/bin/ffmpeg...")
+            with open(encoding_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+    except Exception as e:
+        logger.warning(f"Could not update encoding.xml: {e}")
+
 def main():
     setup_filesystem()
     init_database()
+    configure_jellyfin_encoding()
     nodes = discover_worker_nodes()
     if not nodes:
         logger.warning("No worker node IPs discovered! rffmpeg will rely on local fallback until workers are ready.")
@@ -122,3 +150,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
