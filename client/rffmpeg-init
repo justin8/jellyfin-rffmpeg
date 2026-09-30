@@ -118,7 +118,7 @@ def init_database(args):
     os.environ["RFFMPEG_CONFIG"] = args.rffmpeg_config
     if not os.path.exists(args.db_path):
         logger.info("Initializing rffmpeg database...")
-        subprocess.run(["rffmpeg", "init", "--no-root"], check=True)
+        subprocess.run(["rffmpeg", "init", "-y", "--no-root"], check=True)
 
 
 def discover_worker_nodes(namespace, worker_label):
