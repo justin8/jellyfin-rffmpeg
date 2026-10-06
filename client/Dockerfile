@@ -1,4 +1,4 @@
-FROM jellyfin/jellyfin:12.1
+FROM jellyfin/jellyfin:12.2
 
 LABEL org.opencontainers.image.source="https://github.com/justin8/jellyfin-rffmpeg"
 LABEL org.opencontainers.image.description="Jellyfin server with rffmpeg client and OpenSSH client"
