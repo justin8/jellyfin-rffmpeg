@@ -1,4 +1,4 @@
-FROM jellyfin/jellyfin:12.2
+FROM jellyfin/jellyfin:12.3
 
 LABEL org.opencontainers.image.source="https://github.com/justin8/jellyfin-rffmpeg"
 LABEL org.opencontainers.image.description="Unprivileged rffmpeg transcode worker with Intel QSV and VA-API"
